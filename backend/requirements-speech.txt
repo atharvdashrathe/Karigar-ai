@@ -1,0 +1,24 @@
+# Phase 3: Speech-to-text + translation (Section 2). Kept separate from
+# requirements.txt because these are large and, on a fresh machine, installing
+# plain `torch` from PyPI pulls in full CUDA runtime packages (~4-6GB) even
+# for CPU-only use. Install torch from the CPU wheel index first to avoid that:
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements-speech.txt
+#
+# Note: this file was written and structurally verified (imports, call shapes)
+# but NOT installed/run in the environment this was developed in — that
+# sandbox's network policy blocks huggingface.co and openaipublic.azureedge.net
+# (confirmed via direct request, both return 403), so the actual model
+# downloads couldn't be tested there. It will work normally on a machine with
+# regular internet access. See backend/README.md for what was and wasn't
+# verified, and tests/test_speech_service.py / test_translation_service.py
+# for the graceful-fallback behavior that WAS verified.
+
+transformers>=4.44        # IndicConformer (trust_remote_code) + NLLB
+sentencepiece>=0.2        # required by NLLB's tokenizer
+openai-whisper>=20231117  # ASR fallback
+
+# torch is intentionally not pinned here — install it first via the CPU wheel
+# index command above, or omit this file entirely and let pip resolve the
+# CUDA build from PyPI if you have a GPU and the disk space for it.

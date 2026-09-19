@@ -1,0 +1,87 @@
+# Python / Backend
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+.venv/
+venv/
+ENV/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment Variables & Secrets (CRITICAL)
+.env
+.env.*
+*.env
+backend/.env
+backend/.env.*
+
+# Database & Uploads
+data/*.db
+data/*.sqlite*
+data/uploads/
+*.db
+*.sqlite
+*.sqlite3
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+.output/
+frontend/.output/
+.nitro/
+frontend/.nitro/
+.wrangler/
+frontend/.wrangler/
+.tanstack/
+frontend/.tanstack/
+dist/
+frontend/dist/
+build/
+.npm
+*.log
+
+# AI Models & Binaries (large files / downloads)
+models/*.onnx
+models/*.pt
+models/*.bin
+models/*.safetensors
+*.zip
+*.tar.gz
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Environment variables and secrets.env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local database
+*.db
+*.sqlite
+*.sqlite3
+
+# User-generated uploads and audio
+data/uploads/
+data/demo/audio/
+

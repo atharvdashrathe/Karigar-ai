@@ -1,0 +1,18 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+pydantic-settings>=2.6
+sqlalchemy>=2.0
+python-dotenv>=1.0
+python-multipart>=0.0.12
+
+# Phase 2: AI Image Studio (Section 1). CPU-safe — onnxruntime-gpu can replace
+# onnxruntime in requirements-gpu.txt later without touching vision_service.py.
+pillow>=10.4
+numpy>=1.26
+rembg>=2.0
+onnxruntime>=1.19
+
+# Testing
+pytest>=8.3
+httpx>=0.27
