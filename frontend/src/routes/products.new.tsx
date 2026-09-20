@@ -188,7 +188,58 @@ function AddProduct() {
     setBusy(false);
   }
 
+  const speechRecognitionRef = useRef<any>(null);
+
   async function startRecording() {
+    setRecording(true);
+    setTranscript("");
+
+    // 1. Try Browser Native Web Speech API
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = lang === "mr" ? "mr-IN" : lang === "hi" ? "hi-IN" : "en-IN";
+
+        let finalTranscriptAccumulator = "";
+
+        recognition.onresult = (event: any) => {
+          let interimTranscript = "";
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscriptAccumulator += event.results[i][0].transcript + " ";
+            } else {
+              interimTranscript += event.results[i][0].transcript;
+            }
+          }
+          const liveText = (finalTranscriptAccumulator + interimTranscript).trim();
+          setTranscript(liveText);
+          setDescription(liveText);
+        };
+
+        recognition.onerror = (event: any) => {
+          console.warn("Web Speech API error:", event.error);
+        };
+
+        recognition.onend = () => {
+          if (recording) {
+            setRecording(false);
+          }
+        };
+
+        recognition.start();
+        speechRecognitionRef.current = recognition;
+        return;
+      } catch (e) {
+        console.warn("SpeechRecognition fallback to MediaRecorder", e);
+      }
+    }
+
+    // 2. Fallback to MediaRecorder
     try {
       audioChunksRef.current = [];
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -220,16 +271,27 @@ function AddProduct() {
       };
 
       mediaRecorder.start();
-      setRecording(true);
     } catch {
       toast.error("Microphone access denied. You can type your description directly in the box below.");
+      setRecording(false);
     }
   }
 
   function stopRecording() {
-    if (mediaRecorderRef.current && recording) {
+    setRecording(false);
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      speechRecognitionRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
       mediaRecorderRef.current.stop();
-      setRecording(false);
+    }
+    if (transcript.trim()) {
+      toast.success("Voice story captured! Click Generate AI Catalogue to proceed.");
     }
   }
 

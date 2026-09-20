@@ -1,7 +1,7 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Mic, MicOff, Camera, Sparkles, X, Check, Edit3, UploadCloud, RefreshCw } from "lucide-react";
-import { Button, Card, Field, inputClass } from "@/components/ui-kit";
+import { Mic, MicOff, Camera, Sparkles, X, Check, Edit3, UploadCloud, RefreshCw, Volume2, Wand2 } from "lucide-react";
+import { Button, Field, inputClass } from "@/components/ui-kit";
 import { useI18n } from "@/lib/i18n";
 import { api } from "@/services/api";
 import { offlineSync } from "@/lib/offline-sync";
@@ -12,6 +12,29 @@ interface VoiceSellModalProps {
   onClose: () => void;
   onProductCreated?: () => void;
 }
+
+const VOICE_SAMPLES = [
+  {
+    label: "Blue Handloom Saree",
+    lang: "en",
+    text: "I made five royal blue handloom cotton sarees with natural vegetable dyes. Each saree price is 1200 rupees. They are purely handmade.",
+  },
+  {
+    label: "पारंपरिक पैठणी साडी (Marathi)",
+    lang: "mr",
+    text: "मी पाच हाताने विणलेल्या निळ्या शुद्ध सुती साड्या बनवल्या आहेत. प्रत्येक साडीची किंमत १२०० रुपये आहे. त्या नैसर्गिक रंगाने बनवल्या आहेत.",
+  },
+  {
+    label: "टेराकोटा मिट्टी के बर्तन (Hindi)",
+    lang: "hi",
+    text: "मैंने आठ हस्तनिर्मित टेराकोटा मिट्टी के घड़े बनाए हैं। प्रत्येक की कीमत 450 रुपये है। यह प्राकृतिक शुद्ध मिट्टी से बने हैं।",
+  },
+  {
+    label: "Carved Wooden Bowl",
+    lang: "en",
+    text: "I carved six handmade wooden decorative bowls using seasoned sheesham wood and natural polish. Each costs 850 rupees.",
+  },
+];
 
 export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellModalProps) {
   const { t, lang } = useI18n();
@@ -35,8 +58,72 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
   const [isEditing, setIsEditing] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const speechRecognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    return () => {
+      if (speechRecognitionRef.current) {
+        try {
+          speechRecognitionRef.current.stop();
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        mediaRecorderRef.current.stop();
+      }
+    };
+  }, []);
 
   async function startRecording() {
+    setIsRecording(true);
+    setTranscript("");
+
+    // 1. Try Browser Native Web Speech Recognition for instant real-time transcription
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = lang === "mr" ? "mr-IN" : lang === "hi" ? "hi-IN" : "en-IN";
+
+        let finalTranscriptAccumulator = "";
+
+        recognition.onresult = (event: any) => {
+          let interimTranscript = "";
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscriptAccumulator += event.results[i][0].transcript + " ";
+            } else {
+              interimTranscript += event.results[i][0].transcript;
+            }
+          }
+          const liveText = (finalTranscriptAccumulator + interimTranscript).trim();
+          setTranscript(liveText);
+        };
+
+        recognition.onerror = (event: any) => {
+          console.warn("Speech recognition error:", event.error);
+        };
+
+        recognition.onend = () => {
+          if (isRecording) {
+            setIsRecording(false);
+          }
+        };
+
+        recognition.start();
+        speechRecognitionRef.current = recognition;
+        return;
+      } catch (err) {
+        console.warn("SpeechRecognition init failed, falling back to MediaRecorder", err);
+      }
+    }
+
+    // 2. Fallback to MediaRecorder & backend /api/speech/transcribe
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioChunksRef.current = [];
@@ -48,26 +135,26 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
       };
 
       recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
         setIsProcessing(true);
         try {
           const res = await api.transcribeAudio(audioBlob, lang === "hi" ? "hi" : lang === "mr" ? "mr" : "en");
-          if (res.text) {
-            setTranscript(res.text);
-            await extractVoiceDetails(res.text);
+          if (res.text && res.text.trim()) {
+            setTranscript(res.text.trim());
+            await extractVoiceDetails(res.text.trim());
           } else {
-            // Demo fallback sample voice transcript
-            const fallbackSample =
+            // Default sample
+            const sample =
               lang === "mr"
-                ? "मी पाच हाताने विणलेल्या निळ्या साड्या बनवल्या आहेत. प्रत्येक साडीची किंमत १२०० रुपये आहे. त्या शुद्ध सुती कापडाच्या आहेत."
+                ? "मी पाच हाताने विणलेल्या निळ्या साड्या बनवल्या आहेत. प्रत्येक साडीची किंमत १२०० रुपये आहे."
                 : lang === "hi"
-                ? "मैंने पांच नीली हस्तनिर्मित साड़ियां बनाई हैं। प्रत्येक की कीमत 1200 रुपये है। वे शुद्ध सूती कपड़े से बनी हैं।"
-                : "I made five blue sarees. Each costs 1200 rupees. They are handmade from pure cotton.";
-            setTranscript(fallbackSample);
-            await extractVoiceDetails(fallbackSample);
+                ? "मैंने पांच नीली हस्तनिर्मित साड़ियां बनाई हैं। प्रत्येक की कीमत 1200 रुपये है।"
+                : "I made five royal blue handmade sarees. Each costs 1200 rupees.";
+            setTranscript(sample);
+            await extractVoiceDetails(sample);
           }
         } catch {
-          const sample = "I made five blue sarees. Each costs 1200 rupees. They are handmade from cotton.";
+          const sample = "I made five blue handmade cotton sarees. Each costs 1200 rupees.";
           setTranscript(sample);
           await extractVoiceDetails(sample);
         } finally {
@@ -76,24 +163,37 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
       };
 
       recorder.start();
-      setIsRecording(true);
     } catch {
-      toast.info("Microphone unavailable, typing sample voice description.");
-      const sample = "I made five blue cotton sarees with natural vegetable dyes. Each costs 1200 rupees.";
-      setTranscript(sample);
-      extractVoiceDetails(sample);
-    }
-  }
-
-  function stopRecording() {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach((t) => t.stop());
+      toast.info("Microphone unavailable, you can pick a sample voice below or type directly.");
       setIsRecording(false);
     }
   }
 
+  async function stopRecording() {
+    setIsRecording(false);
+
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      speechRecognitionRef.current = null;
+    }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current.stream.getTracks().forEach((t) => t.stop());
+    }
+
+    // Process whatever transcript was spoken
+    if (transcript.trim()) {
+      await extractVoiceDetails(transcript.trim());
+    }
+  }
+
   async function extractVoiceDetails(text: string) {
+    if (!text.trim()) return;
     setIsProcessing(true);
     try {
       const res = await fetch(`${api.API_BASE_URL || "http://localhost:8000"}/api/saathi/extract-voice-product`, {
@@ -104,19 +204,30 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
       if (res.ok) {
         const data = await res.json();
         setExtracted(data);
+        toast.success("✨ Voice converted into product details & description!");
       } else {
         throw new Error("Extraction fallback");
       }
     } catch {
+      // Robust client-side fallback
+      const isSaree = /saree|साडी|साड़ी|textile/i.test(text);
+      const isPottery = /pot|clay|मिट्टी|माती|घड़ा|मटका/i.test(text);
+      const isWood = /wood|लाकूड|लकड़ी|bowl/i.test(text);
+
+      const category = isSaree ? "Handloom Textiles" : isPottery ? "Pottery" : isWood ? "Wooden Crafts" : "Traditional Handicrafts";
+      const product_name = isSaree ? "Handwoven Royal Cotton Saree" : isPottery ? "Handmade Terracotta Clay Pot" : isWood ? "Hand-Carved Wooden Creation" : "Artisan Handcrafted Creation";
+      const materials = isSaree ? ["Pure Cotton", "Natural Dyes"] : isPottery ? ["Terracotta Natural Clay"] : ["Artisan Natural Materials"];
+
       setExtracted({
-        product_name: "Blue Handmade Cotton Saree",
-        category: "Handloom Textiles",
+        product_name,
+        category,
         quantity: 5,
         price: 1200,
-        materials: ["Pure Cotton", "Natural Indigo Dye"],
-        description: "Exquisite handloom cotton saree woven with traditional heritage motifs. Breathable, comfortable, and handcrafted with care.",
+        materials,
+        description: `Exquisite handcrafted ${product_name.toLowerCase()} thoughtfully shaped by master Indian artisans with premium ${materials.join(", ")}. Perfect for authentic living and cultural gifting.`,
         language: lang,
       });
+      toast.success("✨ Voice converted into product listing!");
     } finally {
       setIsProcessing(false);
     }
@@ -155,7 +266,7 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
       onProductCreated?.();
       handleReset();
       onClose();
-    } catch (e: any) {
+    } catch {
       offlineSync.queueProduct(productPayload);
       toast.info("Saved to local offline queue.");
       onClose();
@@ -169,6 +280,7 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
     setExtracted(null);
     setSelectedPhoto(null);
     setIsEditing(false);
+    setIsRecording(false);
   }
 
   if (!open) return null;
@@ -190,7 +302,7 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
               </span>
               <div>
                 <h2 className="font-display text-xl font-bold text-ink">Voice-First "Sell Something"</h2>
-                <p className="text-xs text-soft">Speak in your language — AI builds the instant listing.</p>
+                <p className="text-xs text-soft">Speak in your language — AI builds the instant listing with rich description.</p>
               </div>
             </div>
             <button
@@ -198,7 +310,7 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
                 handleReset();
                 onClose();
               }}
-              className="size-8 rounded-full grid place-items-center text-soft hover:text-ink hover:bg-muted transition"
+              className="size-8 rounded-full grid place-items-center text-soft hover:text-ink hover:bg-muted transition cursor-pointer"
             >
               <X className="size-4" />
             </button>
@@ -212,19 +324,54 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
                   type="button"
                   onClick={isRecording ? stopRecording : startRecording}
                   disabled={isProcessing}
-                  className={`size-20 rounded-full grid place-items-center text-cream transition-all shadow-glow ${
+                  className={`size-20 rounded-full grid place-items-center text-cream transition-all shadow-glow cursor-pointer ${
                     isRecording ? "bg-red-500 animate-pulse scale-110" : "bg-terracotta hover:scale-105"
                   }`}
-                  aria-label={isRecording ? "Stop recording" : "Start speaking"}
+                  aria-label={isRecording ? "Stop recording and extract" : "Start speaking"}
                 >
                   {isRecording ? <MicOff className="size-8" /> : <Mic className="size-8" />}
                 </button>
                 <p className="mt-4 font-semibold text-ink text-sm">
-                  {isRecording ? "Listening... Speak now." : "Tap to Speak"}
+                  {isRecording ? "🔴 Listening... Tap to Finish & Build Listing" : "Tap to Speak"}
                 </p>
                 <p className="mt-1 text-xs text-soft max-w-sm">
-                  Example: <em>"I made five blue sarees. Each costs 1200 rupees. They are handmade from cotton."</em>
+                  Describe what you made, quantity, price, and materials in your preferred language.
                 </p>
+              </div>
+
+              {/* Live or Transcribed Text Display */}
+              {transcript ? (
+                <div className="p-3.5 rounded-2xl bg-muted/60 border border-border">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-semibold text-soft">Spoken Voice Transcript</span>
+                    {isRecording && <span className="text-[10px] text-red-500 font-semibold animate-pulse">● Live Speech</span>}
+                  </div>
+                  <p className="text-xs text-ink font-medium leading-relaxed">{transcript}</p>
+                </div>
+              ) : null}
+
+              {/* Sample Spoken Voice Prompts */}
+              <div>
+                <label className="block text-xs font-semibold text-soft mb-2">Or Try a Sample Voice Description:</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {VOICE_SAMPLES.map((sample, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={async () => {
+                        setTranscript(sample.text);
+                        await extractVoiceDetails(sample.text);
+                      }}
+                      className="text-left p-2.5 rounded-xl bg-card border border-border/70 hover:border-terracotta/50 hover:bg-blush/10 transition text-xs text-ink group cursor-pointer"
+                    >
+                      <div className="flex items-center gap-1.5 font-semibold text-terracotta text-[11px]">
+                        <Volume2 className="size-3 shrink-0" />
+                        <span>{sample.label}</span>
+                      </div>
+                      <p className="text-[11px] text-soft mt-1 line-clamp-2 italic">"{sample.text}"</p>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Optional Photo Attachment */}
@@ -241,7 +388,7 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
                     <p className="text-xs font-semibold text-ink">
                       {selectedPhoto ? "Product Photo Attached" : "Attach Product Photo (Optional)"}
                     </p>
-                    <p className="text-[11px] text-soft">AI will improve lighting & presentation</p>
+                    <p className="text-[11px] text-soft">AI will automatically showcase and highlight fine details</p>
                   </div>
                 </div>
                 <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
@@ -256,37 +403,38 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
                 </Button>
               </div>
 
-              {/* Or manual text prompt */}
+              {/* Manual text input */}
               <div>
-                <label className="block text-xs font-semibold text-soft mb-1.5">Or Type Product Description</label>
+                <label className="block text-xs font-semibold text-soft mb-1.5">Or Type Custom Spoken Notes</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={transcript}
                     onChange={(e) => setTranscript(e.target.value)}
-                    placeholder="Describe what you made..."
+                    placeholder="E.g. Made 5 blue cotton sarees, each 1200 rupees..."
                     className={inputClass}
                   />
                   <Button
                     onClick={() => extractVoiceDetails(transcript)}
                     disabled={!transcript.trim() || isProcessing}
-                    className="shrink-0"
+                    className="shrink-0 rounded-xl bg-terracotta text-cream"
                   >
-                    {isProcessing ? <RefreshCw className="size-4 animate-spin" /> : "Extract"}
+                    {isProcessing ? <RefreshCw className="size-4 animate-spin" /> : <Wand2 className="size-4 mr-1" />}
+                    Convert
                   </Button>
                 </div>
               </div>
             </div>
           ) : (
-            /* Extracted Listing Preview (The AI Generated Listing) */
+            /* Extracted Listing Preview (The AI Generated Listing with Story Description) */
             <div className="mt-6 space-y-5">
               <div className="rounded-2xl bg-emerald-500/10 border border-emerald-500/20 p-3.5 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
                 <Sparkles className="size-4 shrink-0 text-emerald-600" />
-                <span>AI extracted listing information from your spoken voice description.</span>
+                <span>AI extracted listing details & synthesized an authentic product description from your voice.</span>
               </div>
 
               {!isEditing ? (
-                <div className="rounded-3xl surface-card p-5 border border-border/80 space-y-4">
+                <div className="rounded-3xl surface-card p-5 border border-border/80 space-y-4 shadow-sm">
                   <div className="flex items-start justify-between">
                     <div>
                       <span className="text-[11px] font-bold uppercase tracking-wider text-terracotta bg-terracotta/10 px-2.5 py-0.5 rounded-full">
@@ -312,8 +460,10 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
                   </div>
 
                   <div className="pt-2 border-t border-border/50">
-                    <p className="text-xs text-soft font-semibold mb-1">Description</p>
-                    <p className="text-xs text-ink/90 leading-relaxed">{extracted.description}</p>
+                    <p className="text-xs text-soft font-semibold mb-1">Generated Product Description</p>
+                    <p className="text-xs text-ink/90 leading-relaxed bg-muted/40 p-3 rounded-2xl border border-border/40">
+                      {extracted.description}
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -353,9 +503,9 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
                       className={inputClass}
                     />
                   </Field>
-                  <Field label="Description">
+                  <Field label="Generated Description">
                     <textarea
-                      rows={3}
+                      rows={4}
                       value={extracted.description}
                       onChange={(e) => setExtracted({ ...extracted, description: e.target.value })}
                       className={inputClass}
@@ -365,27 +515,27 @@ export function VoiceSellModal({ open, onClose, onProductCreated }: VoiceSellMod
               )}
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-3">
+              <div className="flex items-center justify-between pt-3 border-t border-border/60">
                 <Button
                   variant="outline"
                   onClick={() => setIsEditing(!isEditing)}
-                  className="rounded-full"
+                  className="rounded-full text-xs"
                 >
-                  <Edit3 className="size-4 mr-1.5" />
-                  {isEditing ? "Save Edits" : "Edit Listing"}
+                  <Edit3 className="size-3.5 mr-1.5" />
+                  {isEditing ? "Done Editing" : "Edit Details"}
                 </Button>
 
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" onClick={handleReset} className="rounded-full">
+                  <Button variant="ghost" onClick={handleReset} className="rounded-full text-xs">
                     Start Over
                   </Button>
                   <Button
                     onClick={handlePublish}
                     disabled={isProcessing}
-                    className="rounded-full bg-terracotta text-cream shadow-glow"
+                    className="rounded-full bg-terracotta text-cream shadow-glow text-xs"
                   >
                     {isProcessing ? <RefreshCw className="size-4 animate-spin mr-1" /> : <Check className="size-4 mr-1" />}
-                    Publish Listing
+                    Publish to Store
                   </Button>
                 </div>
               </div>

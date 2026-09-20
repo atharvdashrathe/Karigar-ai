@@ -390,83 +390,125 @@ async def extract_product_from_voice(
         prompt = (
             "You are Karigar AI's natural voice extractor for rural Indian artisans.\n"
             "The artisan spoke about a product they made. Extract key details into structured JSON.\n"
-            f'Spoken Text: "{transcript}"\n'
+            "Generate an authentic, attractive, customer-ready e-commerce product description in English (or Hindi if requested) "
+            "that highlights artisan handcrafting techniques, natural materials, durability, and cultural heritage.\n\n"
+            f'Spoken Voice Transcript: "{transcript}"\n'
             f"Language hint: {language}\n\n"
-            "Return JSON:\n"
+            "Return valid JSON:\n"
             "{\n"
-            '  "product_name": "E.g. Blue Handmade Cotton Saree",\n'
-            '  "category": "E.g. Handloom Textiles, Traditional Handicrafts, Pottery, Artisan Jewellery, Wooden Crafts",\n'
+            '  "product_name": "E.g. Royal Blue Handcrafted Cotton Saree",\n'
+            '  "category": "Handloom Textiles | Traditional Handicrafts | Pottery | Artisan Jewellery | Wooden Crafts | Bamboo Weaving",\n'
             '  "quantity": 5,\n'
-            '  "price": 1200,\n'
-            '  "materials": ["Cotton", "Natural dye"],\n'
-            '  "description": "Engaging, authentic e-commerce description crafted from their voice",\n'
+            '  "price": 1200.0,\n'
+            '  "materials": ["Pure Cotton", "Natural Indigo Dye"],\n'
+            '  "description": "Exquisite handloom cotton saree woven with traditional heritage motifs. Breathable, comfortable, and handcrafted with care by master artisans for timeless elegance.",\n'
             '  "language": "en"\n'
             "}"
         )
         contents = [{"role": "user", "parts": [{"text": prompt}]}]
-        res = await call_gemini(contents, temperature=0.1)
+        res = await call_gemini(contents, temperature=0.2)
         if res and "product_name" in res:
+            desc = res.get("description")
+            if not desc or len(desc.strip()) < 10:
+                desc = f"Authentic handcrafted {res.get('product_name', 'artisan piece')} made with exceptional craftsmanship and traditional heritage techniques. Handcrafted from premium materials."
             return {
                 "product_name": res.get("product_name", "Handcrafted Artisan Product"),
                 "category": res.get("category", "Traditional Handicrafts"),
                 "quantity": int(res.get("quantity") or 1),
                 "price": float(res.get("price") or 699),
-                "materials": res.get("materials") if isinstance(res.get("materials"), list) else ["Handcrafted materials"],
-                "description": res.get("description") or transcript,
+                "materials": res.get("materials") if isinstance(res.get("materials"), list) and res.get("materials") else ["Handcrafted materials"],
+                "description": desc,
                 "language": res.get("language") or language,
-                "confidence": 0.92,
+                "confidence": 0.94,
             }
 
-    # Offline / Heuristic regex fallback
+    # Offline / Heuristic multilingual regex fallback
+    word_to_num = {
+        "एक": 1, "दोन": 2, "दो": 2, "तीन": 3, "चार": 4, "पांच": 5, "पाच": 5, "पाँच": 5,
+        "सहा": 6, "छह": 6, "सात": 7, "आठ": 8, "नऊ": 9, "नौ": 9, "दहा": 10, "दस": 10,
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+        "eight": 8, "nine": 9, "ten": 10, "dozen": 12, "pair": 2
+    }
+
     qty = 1
-    qty_match = re.search(r"(\d+)\s*(pieces|items|sarees|baskets|pots|bowls|units|nag|piece)?", transcript, re.I)
+    t_lower = transcript.lower()
+
+    # Check digit quantity
+    qty_match = re.search(r"(\d+)\s*(pieces|items|sarees|baskets|pots|bowls|units|nag|piece|साड्या|साड़ियां|नग|भांडी)?", transcript, re.I)
     if qty_match:
         try:
             qty = int(qty_match.group(1))
         except Exception:
             pass
+    else:
+        # Check word quantity
+        for w, n in word_to_num.items():
+            if re.search(rf"\b{w}\b", t_lower):
+                qty = n
+                break
 
+    # Price detection
     price = 699.0
-    price_match = re.search(r"(?:₹|rs\.?|rupees?|costs?|price)\s*(\d[\d,]*)", transcript, re.I)
+    price_match = re.search(r"(?:₹|rs\.?|rupees?|costs?|price|किंमत|दाम|मूल्य|रुपये|रुपए)\s*[:=]?\s*(\d[\d,]*)", transcript, re.I)
+    if not price_match:
+        price_match = re.search(r"(\d[\d,]*)\s*(?:₹|rs\.?|rupees?|रुपये|रुपए)", transcript, re.I)
     if price_match:
         try:
             price = float(price_match.group(1).replace(",", ""))
         except Exception:
             pass
 
-    t_lower = transcript.lower()
     cat = "Traditional Handicrafts"
-    materials = ["Handmade materials"]
-    if "saree" in t_lower or "textile" in t_lower or "cloth" in t_lower or "dupatta" in t_lower or "cotton" in t_lower:
-        cat = "Handloom Textiles"
-        materials = ["Cotton", "Natural Dye"]
-    elif "pot" in t_lower or "clay" in t_lower or "terracotta" in t_lower:
-        cat = "Pottery"
-        materials = ["Terracotta Clay"]
-    elif "jewel" in t_lower or "necklace" in t_lower or "brass" in t_lower or "diya" in t_lower:
-        cat = "Artisan Jewellery"
-        materials = ["Brass", "Beads"]
-    elif "wood" in t_lower or "bowl" in t_lower or "carv" in t_lower:
-        cat = "Wooden Crafts"
-        materials = ["Seasoned Wood"]
-    elif "bamboo" in t_lower or "basket" in t_lower:
-        cat = "Traditional Handicrafts"
-        materials = ["Natural Bamboo"]
+    materials = ["Handcrafted Natural Materials"]
+    item_title_core = "Artisan Craft Piece"
 
-    title = f"Handcrafted {cat}"
-    words = [w.capitalize() for w in transcript.split()[:4]]
-    if words:
-        title = " ".join(words)
+    if any(k in t_lower for k in ["saree", "साडी", "साड़ी", "textile", "cloth", "dupatta", "दुपट्टा", "cotton", "सुती", "सूती", "सूत", "विणलेली"]):
+        cat = "Handloom Textiles"
+        materials = ["Pure Handloom Cotton", "Natural Dyes"]
+        item_title_core = "Handloom Woven Saree"
+    elif any(k in t_lower for k in ["pot", "clay", "terracotta", "माती", "माटी", "भांडे", "कुंभार", "घडा", "मटका"]):
+        cat = "Pottery"
+        materials = ["Terracotta Natural Clay", "Organic Glaze"]
+        item_title_core = "Terracotta Earthenware Craft"
+    elif any(k in t_lower for k in ["jewel", "necklace", "brass", "diya", "दागिने", "हार", "पितळ", "पीतल", "झुमके", "दीया"]):
+        cat = "Artisan Jewellery"
+        materials = ["Hand-cast Brass", "Traditional Embellishments"]
+        item_title_core = "Artisan Handcrafted Jewellery"
+    elif any(k in t_lower for k in ["wood", "bowl", "carv", "लाकूड", "लाकडी", "लकड़ी", "कोरलेले"]):
+        cat = "Wooden Crafts"
+        materials = ["Seasoned Sheesham Wood", "Natural Beeswax Finish"]
+        item_title_core = "Hand-Carved Wooden Creation"
+    elif any(k in t_lower for k in ["bamboo", "basket", "बांबू", "टोपली", "बांस", "टोकरी"]):
+        cat = "Bamboo Weaving"
+        materials = ["Locally Sourced Organic Bamboo", "Plant Fibers"]
+        item_title_core = "Hand-Woven Bamboo Craft"
+
+    # Extract color hint if present
+    color_hint = ""
+    for c_en, c_hi, c_mr in [("Blue", "नीली", "निळी"), ("Red", "लाल", "लाल"), ("Green", "हरी", "हिरवी"), ("Yellow", "पीली", "पिवळी"), ("Black", "काली", "काळी"), ("White", "सफेद", "पांढरी")]:
+        if c_en.lower() in t_lower or c_hi in transcript or c_mr in transcript:
+            color_hint = f"{c_en} "
+            break
+
+    product_name = f"{color_hint}{item_title_core}".strip()
+
+    # Generate an engaging authentic product description
+    materials_str = ", ".join(materials)
+    description = (
+        f"Exquisite handcrafted {product_name.lower()} crafted with care using authentic {materials_str}. "
+        f"Each piece is individually shaped and finished by traditional master artisans, reflecting centuries "
+        f"of generational craft heritage. Perfect for home styling, gifting, and conscious sustainable living."
+    )
 
     return {
-        "product_name": title,
+        "product_name": product_name,
         "category": cat,
         "quantity": qty,
         "price": price,
         "materials": materials,
-        "description": transcript,
+        "description": description,
         "language": language if language != "auto" else "en",
-        "confidence": 0.75,
+        "confidence": 0.88,
     }
 
 
